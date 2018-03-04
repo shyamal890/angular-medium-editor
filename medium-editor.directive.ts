@@ -112,7 +112,7 @@ export class MediumEditorDirective implements OnInit, OnChanges, OnDestroy {
    * Remove MediumEditor on destruction of directive
    */
   ngOnDestroy(): void {
-    this.editor.unsubscribe();
+    this.editor.destroy();
     this.componentDestroyed$.next(true);
     this.componentDestroyed$.complete();
   }
