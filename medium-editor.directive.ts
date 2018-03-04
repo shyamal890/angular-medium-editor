@@ -1,3 +1,7 @@
+import 'rxjs/add/operator/debounceTime'; 
+import 'rxjs/add/operator/distinctUntilChanged';
+import 'rxjs/add/operator/takeUntil';
+import {Subject} from "rxjs/Subject";
 import {
     Directive,
     ElementRef,
@@ -19,7 +23,8 @@ import * as MediumEditor from 'medium-editor';
  * <medium-editor
       [(editorModel)]="textVar"
  *    [editorOptions]="{'toolbar': {'buttons': ['bold', 'italic', 'underline', 'h1', 'h2', 'h3']}}"
- *    [editorPlaceholder]="placeholderVar"></medium-editor>
+ *    [editorPlaceholder]="placeholderVar"
+ *    [debounce]="5000"></medium-editor>
  */
 @Directive({
   selector: 'medium-editor'
@@ -30,10 +35,13 @@ export class MediumEditorDirective implements OnInit, OnChanges, OnDestroy {
   private element: HTMLElement;
   private editor: any;
   private active: boolean;
-
+  private inputEdited: EventEmitter<string> = new EventEmitter<string>();
+  private componentDestroyed$: Subject<boolean> = new Subject();
+  
 	@Input('editorModel') model: any;
   @Input('editorOptions') options: any;
   @Input('editorPlaceholder') placeholder: string;
+  @Input('debounce') debounce: number;
 
   @Output('editorModelChange') update = new EventEmitter();
 
@@ -41,8 +49,9 @@ export class MediumEditorDirective implements OnInit, OnChanges, OnDestroy {
 
   ngOnInit() {
     this.element = this.el.nativeElement;
-    this.element.innerHTML = '<div class="me-editable">' + this.model + '</div>';
+    this.element.innerHTML = '<div class="me-editable">' + (this.model == undefined ? '': this.model) + '</div>';
     this.active = true;
+    
 
     if (this.placeholder && this.placeholder.length) {
       this.options.placeholder = {
@@ -53,8 +62,29 @@ export class MediumEditorDirective implements OnInit, OnChanges, OnDestroy {
     // Global MediumEditor
     this.editor = new MediumEditor('.me-editable', this.options);
     this.editor.subscribe('editableInput', (event, editable) => {
-      this.updateModel();
+      let value = this.editor.getContent();
+      value = value.replace(/&nbsp;/g, '').trim();
+      if(this.debounce != undefined){
+        this.inputEdited.emit(value);
+      }
+      else{
+        this.updateModel(value);
+      }
     });
+    this.editor.subscribe('blur',()=>{
+      if(this.debounce == undefined){return;}
+      let value = this.editor.getContent();
+      value = value.replace(/&nbsp;/g, '').trim();
+      this.updateModel(value);
+    })
+
+    if(this.debounce != undefined){
+      this.inputEdited
+        .takeUntil(this.componentDestroyed$)
+        .distinctUntilChanged()
+        .debounceTime(this.debounce)
+        .subscribe(x=> this.updateModel(x));
+    }
   }
 
   refreshView() {
@@ -73,9 +103,7 @@ export class MediumEditorDirective implements OnInit, OnChanges, OnDestroy {
   /**
    * Emit updated model
    */
-  updateModel(): void {
-    let value = this.editor.getContent();
-    value = value.replace(/&nbsp;/g, '').trim();
+  updateModel(value:string): void {
     this.lastViewModel = value;
     this.update.emit(value);
   }
@@ -84,7 +112,9 @@ export class MediumEditorDirective implements OnInit, OnChanges, OnDestroy {
    * Remove MediumEditor on destruction of directive
    */
   ngOnDestroy(): void {
-    this.editor.destroy();
+    this.editor.unsubscribe();
+    this.componentDestroyed$.next(true);
+    this.componentDestroyed$.complete();
   }
 
   isPropertyUpdated(changes, viewModel) {
